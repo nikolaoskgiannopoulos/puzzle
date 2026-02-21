@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="el">
+<head>
+    <meta charset="UTF-8">
+    <title>Το Κέντρο Puzzle Μας!</title>
+    <style>
+        :root { --border-col: #5d4037; --wood: #f4e4bc; }
+        body { 
+            margin: 0; background: #faf3e0; font-family: 'Segoe UI', sans-serif;
+            display: flex; flex-direction: column; align-items: center; 
+        }
+
+        #menu-overlay {
+            position: fixed; top:0; left:0; width:100%; height:100%;
+            background: rgba(0,0,0,0.9); z-index: 2000;
+            display: flex; justify-content: center; align-items: center;
+        }
+        .menu-card { 
+            background: white; padding: 40px; border-radius: 25px; 
+            text-align: center; border: 10px solid var(--border-col);
+        }
+        .puzzle-option {
+            display: inline-block; width: 150px; margin: 15px; padding: 20px;
+            cursor: pointer; background: #efe0c9; border-radius: 15px;
+            border: 4px solid var(--border-col); transition: 0.3s;
+        }
+        .puzzle-option:hover { transform: scale(1.1); background: #d7b899; }
+
+        #game-board {
+            position: relative; width: 900px; height: 600px;
+            border: 12px solid var(--border-col); margin-top: 20px;
+            background-color: #ddd; background-size: 900px 600px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        /* Το Fade εφέ */
+        #board-bg {
+            position: absolute; top:0; left:0; width:100%; height:100%;
+            background-size: 900px 600px; opacity: 0.25; z-index: 0;
+        }
+
+        #pieces-tray {
+            width: 950px; min-height: 200px; margin: 20px; padding: 20px;
+            background: #efe0c9; border-radius: 20px; border: 3px dashed var(--border-col);
+            display: flex; flex-wrap: wrap; justify-content: center; gap: 10px;
+        }
+
+        .piece {
+            width: 150px; height: 150px; cursor: grab;
+            background-size: 900px 600px; box-sizing: border-box; z-index: 10;
+        }
+
+        .dragging { border: 4px solid #ff4444; }
+        .near-correct { border: 5px solid #44ff44 !important; }
+        .locked { border: none !important; cursor: default; z-index: 1; }
+
+        .ui-btns { position: fixed; top: 15px; right: 15px; display: flex; gap: 10px; z-index: 3000; }
+        button { padding: 12px 25px; cursor: pointer; background: var(--border-col); color: white; border: none; border-radius: 12px; font-weight: bold; }
+    </style>
+</head>
+<body>
+
+<div id="menu-overlay">
+    <div class="menu-card">
+        <h1>🧩 Διάλεξε Puzzle!</h1>
+        <div class="puzzle-option" onclick="startLevel('puzzle1.jpg')">📸 ΜΠΑΜΠΑΣ</div>
+        <div class="puzzle-option" onclick="startLevel('puzzle2.jpg')">🎨 SPIDERMAN</div>
+        <div class="puzzle-option" onclick="startLevel('puzzle3.jpg')">🌳 ΜΑΜΑ</div>
+    </div>
+</div>
+
+<div class="ui-btns">
+    <button onclick="location.reload()">🏠 Μενού</button>
+    <button onclick="toggleM()">🎵 Μουσική</button>
+</div>
+
+<div id="game-board">
+    <div id="board-bg"></div>
+</div>
+<div id="pieces-tray"></div>
+
+<audio id="bgm" loop src="https://www.soundhelix.com/examples/mp3/SoundHelix-Song-1.mp3"></audio>
+
+<script>
+    const board = document.getElementById('game-board');
+    const boardBg = document.getElementById('board-bg');
+    const tray = document.getElementById('pieces-tray');
+    const bgm = document.getElementById('bgm');
+    let currentImg = '';
+
+    function startLevel(imgName) {
+        currentImg = imgName;
+        document.getElementById('menu-overlay').style.display = 'none';
+        
+        // Δοκιμή φόρτωσης εικόνας
+        const testImg = new Image();
+        testImg.src = currentImg;
+        testImg.onerror = () => alert("Σφάλμα: Δεν βρέθηκε το αρχείο " + currentImg + ". Σιγουρέψου ότι το ονόμασες σωστά!");
+        
+        boardBg.style.backgroundImage = `url('${currentImg}')`;
+        init();
+    }
+
+    function init() {
+        board.querySelectorAll('.piece').forEach(p => p.remove());
+        tray.innerHTML = '';
+        let piecesToMove = [];
+
+        for (let r = 0; r < 4; r++) {
+            for (let c = 0; c < 6; c++) {
+                const p = document.createElement('div');
+                p.className = 'piece';
+                p.style.backgroundImage = `url('${currentImg}')`;
+                p.style.backgroundPosition = `-${c * 150}px -${r * 150}px`;
+                p.dataset.x = c * 150;
+                p.dataset.y = r * 150;
+
+                // Αυτόματο κλείδωμα μόνο για τα λευκά της 1ης φωτό
+                const isBlank = currentImg === 'puzzle1.jpg' && 
+                                ['0,0', '5,0', '0,3', '5,3'].includes(`${c},${r}`);
+
+                if (isBlank) {
+                    p.style.position = 'absolute';
+                    p.style.left = (c * 150) + 'px';
+                    p.style.top = (r * 150) + 'px';
+                    p.classList.add('locked');
+                    board.appendChild(p);
+                } else {
+                    setupDrag(p);
+                    piecesToMove.push(p);
+                }
+            }
+        }
+        piecesToMove.sort(() => Math.random() - 0.5).forEach(p => tray.appendChild(p));
+    }
+
+    function setupDrag(el) {
+        el.onmousedown = dragStart;
+        el.ontouchstart = dragStart;
+
+        function dragStart(e) {
+            if (el.classList.contains('locked')) return;
+            e.preventDefault();
+            const evt = e.touches ? e.touches[0] : e;
+            let rect = el.getBoundingClientRect();
+            let shiftX = evt.clientX - rect.left;
+            let shiftY = evt.clientY - rect.top;
+
+            el.classList.add('dragging');
+            el.style.position = 'fixed';
+            el.style.width = '150px'; 
+            el.style.height = '150px';
+
+            function onMove(e) {
+                const mEvt = e.touches ? e.touches[0] : e;
+                el.style.left = mEvt.clientX - shiftX + 'px';
+                el.style.top = mEvt.clientY - shiftY + 'px';
+
+                const bRect = board.getBoundingClientRect();
+                const relX = (mEvt.clientX - shiftX) - bRect.left;
+                const relY = (mEvt.clientY - shiftY) - bRect.top;
+
+                if (Math.abs(relX - el.dataset.x) < 45 && Math.abs(relY - el.dataset.y) < 45) {
+                    el.classList.add('near-correct');
+                } else {
+                    el.classList.remove('near-correct');
+                }
+            }
+
+            document.addEventListener('mousemove', onMove);
+            document.addEventListener('touchmove', onMove);
+
+            el.onmouseup = el.ontouchend = function() {
+                document.removeEventListener('mousemove', onMove);
+                document.removeEventListener('touchmove', onMove);
+                el.classList.remove('dragging');
+                
+                const bRect = board.getBoundingClientRect();
+                const relX = el.getBoundingClientRect().left - bRect.left;
+                const relY = el.getBoundingClientRect().top - bRect.top;
+
+                if (Math.abs(relX - el.dataset.x) < 45 && Math.abs(relY - el.dataset.y) < 45) {
+                    el.style.position = 'absolute';
+                    el.style.left = el.dataset.x + 'px';
+                    el.style.top = el.dataset.y + 'px';
+                    el.classList.add('locked');
+                    board.appendChild(el);
+                } else {
+                    el.style.position = 'relative'; el.style.left = '0'; el.style.top = '0';
+                    tray.appendChild(el);
+                }
+            };
+        }
+    }
+
+    function toggleM() {
+        if (bgm.paused) bgm.play(); else bgm.pause();
+    }
+</script>
+</body>
+</html>
